@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>心宿 - 心率监视器</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #050505;
+      --fg: #ffffff;
+      --accent: #ff1a1a;
+      --accent-dim: #990000;
+      --muted: #666666;
+      --card: rgba(255, 255, 255, 0.03);
+      --border: rgba(255, 255, 255, 0.08);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'JetBrains Mono', monospace;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    #canvas-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+    }
+
+    .ui-layer {
+      position: relative;
+      z-index: 10;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 顶部控制栏 */
+    .top-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      background: linear-gradient(180deg, rgba(5, 5, 5, 0.95) 0%, rgba(5, 5, 5, 0.8) 70%, transparent 100%);
+      backdrop-filter: blur(10px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .logo {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 6px;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot.connected {
+      background: #00ff88;
+      box-shadow: 0 0 10px #00ff88;
+      animation: statusPulse 2s ease-in-out infinite;
+    }
+
+    .status-dot.alarm {
+      background: var(--accent);
+      box-shadow: 0 0 15px var(--accent);
+      animation: alarmBlink 0.5s ease-in-out infinite;
+    }
+
+    @keyframes statusPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    @keyframes alarmBlink {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.3; transform: scale(0.8); }
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .sound-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+
+    .sound-label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--border);
+      border-radius: 22px;
+      transition: 0.3s;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background: var(--muted);
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: var(--accent-dim);
+    }
+
+    .toggle-switch input:checked + .toggle-slider:before {
+      transform: translateX(18px);
+      background: var(--accent);
+      box-shadow: 0 0 10px var(--accent);
+    }
+
+    .connect-btn {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 10px 20px;
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--accent);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .connect-btn:hover {
+      background: var(--accent);
+      box-shadow: 0 0 20px rgba(255, 26, 26, 0.3);
+    }
+
+    .connect-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .connect-btn.connected {
+      background: var(--accent-dim);
+      border-color: var(--accent-dim);
+    }
+
+    /* 主内容区 */
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 20px 24px;
+      gap: 24px;
+    }
+
+    /* 心率显示区 */
+    .heart-rate-section {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 30px 0;
+    }
+
+    .heart-rate-display {
+      text-align: center;
+    }
+
+    .heart-rate-value {
+      font-family: 'Orbitron', sans-serif;
+      font-size: clamp(80px, 20vw, 160px);
+      font-weight: 900;
+      line-height: 1;
+      color: var(--fg);
+      transition: all 0.1s ease;
+    }
+
+    .heart-rate-value.pulse {
+      color: var(--accent);
+      text-shadow: 0 0 60px var(--accent), 0 0 120px var(--accent);
+    }
+
+    .heart-rate-value.alarm {
+      animation: alarmText 0.5s ease-in-out infinite;
+    }
+
+    @keyframes alarmText {
+      0%, 100% { color: var(--fg); }
+      50% { color: var(--accent); }
+    }
+
+    .heart-rate-unit {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 16px;
+      font-weight: 400;
+      color: var(--muted);
+      letter-spacing: 6px;
+      margin-top: 8px;
+    }
+
+    /* ECG 区域 */
+    .ecg-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .ecg-wrapper {
+      flex: 1;
+      position: relative;
+      min-height: 150px;
+      max-height: 200px;
+    }
+
+    .ecg-label {
+      font-size: 9px;
+      color: var(--accent);
+      letter-spacing: 3px;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      opacity: 0.7;
+    }
+
+    #ecg-canvas {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(180deg, transparent 0%, rgba(255, 26, 26, 0.02) 50%, transparent 100%);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .ecg-grid {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: 
+        linear-gradient(rgba(255, 26, 26, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 26, 26, 0.04) 1px, transparent 1px);
+      background-size: 20px 20px;
+      pointer-events: none;
+    }
+
+    /* 调试面板 */
+    .debug-panel {
+      background: rgba(0, 0, 0, 0.6);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .debug-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .debug-title {
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .debug-count {
+      font-size: 10px;
+      color: var(--accent);
+    }
+
+    .debug-content {
+      height: 120px;
+      overflow-y: auto;
+      padding: 8px 12px;
+      font-size: 10px;
+      line-height: 1.6;
+      color: #888;
+    }
+
+    .debug-content::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .debug-content::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .debug-content::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    .debug-line {
+      display: flex;
+      gap: 12px;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    }
+
+    .debug-time {
+      color: #555;
+      min-width: 70px;
+    }
+
+    .debug-type {
+      color: #666;
+      min-width: 40px;
+    }
+
+    .debug-data {
+      color: #aaa;
+      word-break: break-all;
+    }
+
+    .debug-data.highlight {
+      color: var(--accent);
+    }
+
+    /* 警报状态 */
+    .alarm-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      z-index: 5;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .alarm-overlay.active {
+      opacity: 1;
+      animation: alarmFlash 1s ease-in-out infinite;
+    }
+
+    @keyframes alarmFlash {
+      0%, 100% { background: transparent; }
+      50% { background: rgba(255, 26, 26, 0.05); }
+    }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .top-bar {
+        padding: 12px 16px;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      
+      .brand {
+        width: 100%;
+        justify-content: space-between;
+      }
+      
+      .controls {
+        width: 100%;
+        justify-content: flex-end;
+      }
+      
+      .main-content {
+        padding: 16px;
+      }
+      
+      .sound-label {
+        display: none;
+      }
+      
+      .debug-content {
+        height: 100px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div class="alarm-overlay" id="alarmOverlay"></div>
+  
+  <div class="ui-layer">
+    <!-- 顶部控制栏 -->
+    <header class="top-bar">
+      <div class="brand">
+        <div class="logo">心宿</div>
+        <div class="status-indicator">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">未连接</span>
+        </div>
+      </div>
+      
+      <div class="controls">
+        <div class="sound-control">
+          <span class="sound-label">音效</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="soundToggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <button class="connect-btn" id="connectBtn">连接设备</button>
+      </div>
+    </header>
+
+    <!-- 主内容 -->
+    <main class="main-content">
+      <!-- 心率显示 -->
+      <section class="heart-rate-section">
+        <div class="heart-rate-display">
+          <div class="heart-rate-value" id="heartRate">--</div>
+          <div class="heart-rate-unit">BPM</div>
+        </div>
+      </section>
+
+      <!-- ECG 显示 -->
+      <section class="ecg-section">
+        <div class="ecg-label">实时心电监测</div>
+        <div class="ecg-wrapper">
+          <div class="ecg-grid"></div>
+          <canvas id="ecg-canvas"></canvas>
+        </div>
+      </section>
+
+      <!-- 调试面板 -->
+      <section class="debug-panel">
+        <div class="debug-header">
+          <span class="debug-title">数据包调试</span>
+          <span class="debug-count" id="debugCount">0 packets</span>
+        </div>
+        <div class="debug-content" id="debugContent">
+          <div class="debug-line">
+            <span class="debug-time">--:--:--</span>
+            <span class="debug-type">WAIT</span>
+            <span class="debug-data">等待设备连接...</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // ============ 全局变量初始化 ============
+    let scene = null;
+    let camera = null;
+    let renderer = null;
+    let stars = null;
+    let particles = null;
+    let animationId = null;
+    let audioContext = null;
+    let gainNode = null;
+    let alarmOscillator = null;
+    let alarmInterval = null;
+    
+    let device = null;
+    let server = null;
+    let connected = false;
+    let currentBPM = null;               // 初始无有效心率值
+    let lastBeatTime = 0;
+    let lastDataTime = 0;
+    let pulseIntensity = 0;
+    let isAlarming = false;
+    let packetCount = 0;
+
+    // ECG 相关
+    const ecgData = [];
+    const ecgMaxPoints = 300;
+    let ecgPhase = 0;
+    let ecgCanvas = null;
+    let ecgCtx = null;
+
+    // ============ DOM 元素 ============
+    const connectBtn = document.getElementById('connectBtn');
+    const statusText = document.getElementById('statusText');
+    const statusDot = document.getElementById('statusDot');
+    const heartRateEl = document.getElementById('heartRate');
+    const soundToggle = document.getElementById('soundToggle');
+    const canvasContainer = document.getElementById('canvas-container');
+    const debugContent = document.getElementById('debugContent');
+    const debugCount = document.getElementById('debugCount');
+    const alarmOverlay = document.getElementById('alarmOverlay');
+
+    // ============ 调试日志 ============
+    function logDebug(type, data, highlight = false) {
+      const now = new Date();
+      const time = now.toTimeString().split(' ')[0];
+      
+      const line = document.createElement('div');
+      line.className = 'debug-line';
+      line.innerHTML = `
+        <span class="debug-time">${time}</span>
+        <span class="debug-type">${type}</span>
+        <span class="debug-data ${highlight ? 'highlight' : ''}">${data}</span>
+      `;
+      
+      debugContent.insertBefore(line, debugContent.firstChild);
+      
+      // 限制日志条数
+      while (debugContent.children.length > 50) {
+        debugContent.removeChild(debugContent.lastChild);
+      }
+      
+      packetCount++;
+      debugCount.textContent = `${packetCount} packets`;
+    }
+
+    // ============ 初始化 ECG Canvas ============
+    function initECG() {
+      ecgCanvas = document.getElementById('ecg-canvas');
+      const rect = ecgCanvas.getBoundingClientRect();
+      ecgCanvas.width = rect.width * window.devicePixelRatio;
+      ecgCanvas.height = rect.height * window.devicePixelRatio;
+      ecgCtx = ecgCanvas.getContext('2d');
+      ecgCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      
+      // 初始化为直线（全0）
+      for (let i = 0; i < ecgMaxPoints; i++) {
+        ecgData.push(0);
+      }
+    }
+
+    // ============ 清空ECG数据为直线 ============
+    function clearECGToZero() {
+      ecgData.length = 0;
+      for (let i = 0; i < ecgMaxPoints; i++) {
+        ecgData.push(0);
+      }
+    }
+
+    // ============ ECG 波形生成 ============
+    function generateECGValue(phase, bpm) {
+      // 确保bpm有效
+      if (!bpm || bpm <= 0) return 0;
+      const cycleLength = 60 / Math.max(30, bpm);
+      const t = phase % cycleLength;
+      
+      const pWave = t < 0.1 ? 0.15 * Math.sin((t / 0.1) * Math.PI) : 0;
+      const qStart = 0.12;
+      const qWave = (t > qStart && t < qStart + 0.02) ? -0.1 * Math.sin(((t - qStart) / 0.02) * Math.PI) : 0;
+      const rStart = 0.14;
+      const rWave = (t > rStart && t < rStart + 0.04) ? 0.8 * Math.sin(((t - rStart) / 0.04) * Math.PI) : 0;
+      const sStart = 0.18;
+      const sWave = (t > sStart && t < sStart + 0.03) ? -0.2 * Math.sin(((t - sStart) / 0.03) * Math.PI) : 0;
+      const tStart = 0.25;
+      const tWave = (t > tStart && t < tStart + 0.12) ? 0.25 * Math.sin(((t - tStart) / 0.12) * Math.PI) : 0;
+      
+      return pWave + qWave + rWave + sWave + tWave;
+    }
+
+    // ============ 绘制 ECG ============
+    function drawECG() {
+      if (!ecgCtx || !ecgCanvas) return;
+      
+      const width = ecgCanvas.width / window.devicePixelRatio;
+      const height = ecgCanvas.height / window.devicePixelRatio;
+      const centerY = height / 2;
+      
+      ecgCtx.clearRect(0, 0, width, height);
+      
+      // 中线
+      ecgCtx.strokeStyle = 'rgba(255, 26, 26, 0.1)';
+      ecgCtx.lineWidth = 1;
+      ecgCtx.beginPath();
+      ecgCtx.moveTo(0, centerY);
+      ecgCtx.lineTo(width, centerY);
+      ecgCtx.stroke();
+      
+      // ECG 曲线
+      const gradient = ecgCtx.createLinearGradient(0, 0, width, 0);
+      gradient.addColorStop(0, 'rgba(255, 26, 26, 0.1)');
+      gradient.addColorStop(0.7, 'rgba(255, 26, 26, 0.8)');
+      gradient.addColorStop(1, '#ff1a1a');
+      
+      ecgCtx.strokeStyle = isAlarming ? '#ff1a1a' : gradient;
+      ecgCtx.lineWidth = isAlarming ? 2.5 : 2;
+      ecgCtx.lineCap = 'round';
+      ecgCtx.lineJoin = 'round';
+      
+      ecgCtx.beginPath();
+      
+      const step = width / ecgMaxPoints;
+      for (let i = 0; i < ecgData.length; i++) {
+        const x = i * step;
+        const y = centerY - ecgData[i] * (height * 0.35);
+        
+        if (i === 0) {
+          ecgCtx.moveTo(x, y);
+        } else {
+          ecgCtx.lineTo(x, y);
+        }
+      }
+      
+      ecgCtx.stroke();
+      
+      // 当前点发光
+      const lastX = (ecgData.length - 1) * step;
+      const lastY = centerY - ecgData[ecgData.length - 1] * (height * 0.35);
+      
+      if (pulseIntensity > 0.3 || isAlarming) {
+        const glowRadius = Math.max(1, isAlarming ? 30 : 20);
+        const glowGradient = ecgCtx.createRadialGradient(lastX, lastY, 0, lastX, lastY, glowRadius);
+        glowGradient.addColorStop(0, 'rgba(255, 26, 26, 0.8)');
+        glowGradient.addColorStop(1, 'rgba(255, 26, 26, 0)');
+        
+        ecgCtx.fillStyle = glowGradient;
+        ecgCtx.beginPath();
+        ecgCtx.arc(lastX, lastY, glowRadius, 0, Math.PI * 2);
+        ecgCtx.fill();
+      }
+    }
+
+    // ============ Three.js 初始化 ============
+    function initThree() {
+      scene = new THREE.Scene();
+      
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.z = 50;
+      
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setClearColor(0x050505, 1);
+      canvasContainer.appendChild(renderer.domElement);
+      
+      createStars();
+      createParticles();
+      
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    // ============ 创建星空 ============
+    function createStars() {
+      const starCount = 2000;
+      const positions = new Float32Array(starCount * 3);
+      const sizes = new Float32Array(starCount);
+      const colors = new Float32Array(starCount * 3);
+      
+      for (let i = 0; i < starCount; i++) {
+        positions[i * 3] = (Math.random() - 0.5) * 200;
+        positions[i * 3 + 1] = (Math.random() - 0.5) * 200;
+        positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+        
+        sizes[i] = Math.random() * 2 + 0.5;
+        
+        const colorChoice = Math.random();
+        if (colorChoice < 0.7) {
+          colors[i * 3] = 1;
+          colors[i * 3 + 1] = 1;
+          colors[i * 3 + 2] = 1;
+        } else if (colorChoice < 0.9) {
+          colors[i * 3] = 0.4;
+          colors[i * 3 + 1] = 0.4;
+          colors[i * 3 + 2] = 0.4;
+        } else {
+          colors[i * 3] = 1;
+          colors[i * 3 + 1] = 0.1;
+          colors[i * 3 + 2] = 0.1;
+        }
+      }
+      
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+      geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+      
+      const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uPulse: { value: 0 }
+        },
+        vertexShader: `
+          attribute float size;
+          attribute vec3 aColor;
+          varying vec3 vColor;
+          varying float vPulse;
+          uniform float uTime;
+          uniform float uPulse;
+          
+          void main() {
+            vColor = aColor;
+            
+            vec3 pos = position;
+            float dist = length(pos);
+            
+            float pulseWave = sin(dist * 0.05 - uTime * 3.0) * uPulse * 5.0;
+            pos += normalize(pos) * pulseWave;
+            
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            gl_PointSize = size * (200.0 / -mvPosition.z) * (1.0 + uPulse * 0.5);
+            gl_Position = projectionMatrix * mvPosition;
+            
+            vPulse = uPulse;
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vColor;
+          varying float vPulse;
+          
+          void main() {
+            float dist = length(gl_PointCoord - vec2(0.5));
+            if (dist > 0.5) discard;
+            
+            float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
+            alpha *= 0.6 + vPulse * 0.4;
+            
+            vec3 finalColor = vColor;
+            if (vPulse > 0.3 && vColor.r > 0.9) {
+              finalColor = vec3(1.0, 0.1, 0.1);
+            }
+            
+            gl_FragColor = vec4(finalColor, alpha);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+      
+      stars = new THREE.Points(geometry, material);
+      scene.add(stars);
+    }
+
+    // ============ 创建粒子云 ============
+    function createParticles() {
+      const count = 500;
+      const positions = new Float32Array(count * 3);
+      
+      for (let i = 0; i < count; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const r = 30 + Math.random() * 20;
+        
+        positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        positions[i * 3 + 2] = r * Math.cos(phi);
+      }
+      
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      
+      const material = new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uPulse: { value: 0 }
+        },
+        vertexShader: `
+          varying float vPulse;
+          uniform float uTime;
+          uniform float uPulse;
+          
+          void main() {
+            vec3 pos = position;
+            
+            float breathe = sin(uTime * 0.5) * 2.0;
+            pos *= 1.0 + breathe * 0.05;
+            pos *= 1.0 + uPulse * 0.3;
+            
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            gl_PointSize = 3.0 * (100.0 / -mvPosition.z);
+            gl_Position = projectionMatrix * mvPosition;
+            
+            vPulse = uPulse;
+          }
+        `,
+        fragmentShader: `
+          varying float vPulse;
+          
+          void main() {
+            float dist = length(gl_PointCoord - vec2(0.5));
+            if (dist > 0.5) discard;
+            
+            float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
+            alpha *= 0.3;
+            
+            vec3 color = mix(vec3(0.5), vec3(1.0, 0.1, 0.1), vPulse);
+            
+            gl_FragColor = vec4(color, alpha);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+      
+      particles = new THREE.Points(geometry, material);
+      scene.add(particles);
+    }
+
+    // ============ 窗口调整 ============
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      
+      if (ecgCanvas && ecgCtx) {
+        const rect = ecgCanvas.getBoundingClientRect();
+        ecgCanvas.width = rect.width * window.devicePixelRatio;
+        ecgCanvas.height = rect.height * window.devicePixelRatio;
+        ecgCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      }
+    }
+
+    // ============ 音频初始化 ============
+    function initAudio() {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        gainNode = audioContext.createGain();
+        gainNode.connect(audioContext.destination);
+        gainNode.gain.value = 1;
+      }
+    }
+
+    // ============ 心跳音 ============
+    function playHeartbeat() {
+      if (!soundToggle.checked) return;
+      
+      initAudio();
+      
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      
+      const osc = audioContext.createOscillator();
+      const oscGain = audioContext.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(60, audioContext.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(40, audioContext.currentTime + 0.1);
+      
+      oscGain.gain.setValueAtTime(0.5, audioContext.currentTime);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.15);
+      
+      osc.connect(oscGain);
+      oscGain.connect(gainNode);
+      
+      osc.start(audioContext.currentTime);
+      osc.stop(audioContext.currentTime + 0.15);
+    }
+
+    // ============ 警报音 ============
+    function startAlarm() {
+      if (isAlarming) return;
+      isAlarming = true;
+      
+      initAudio();
+      
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      
+      alarmOverlay.classList.add('active');
+      statusDot.classList.add('alarm');
+      heartRateEl.classList.add('alarm');
+      
+      logDebug('ALARM', '心率信号丢失 - 启动警报', true);
+      
+      // 尖锐蜂鸣警报
+      alarmInterval = setInterval(() => {
+        if (!isAlarming || !soundToggle.checked) return;
+        
+        const osc = audioContext.createOscillator();
+        const oscGain = audioContext.createGain();
+        
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(800, audioContext.currentTime);
+        
+        oscGain.gain.setValueAtTime(0.3, audioContext.currentTime);
+        oscGain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.3);
+        
+        osc.connect(oscGain);
+        oscGain.connect(gainNode);
+        
+        osc.start(audioContext.currentTime);
+        osc.stop(audioContext.currentTime + 0.3);
+      }, 500);
+    }
+
+    function stopAlarm() {
+      if (!isAlarming) return;
+      isAlarming = false;
+      
+      alarmOverlay.classList.remove('active');
+      statusDot.classList.remove('alarm');
+      heartRateEl.classList.remove('alarm');
+      
+      if (alarmInterval) {
+        clearInterval(alarmInterval);
+        alarmInterval = null;
+      }
+      
+      logDebug('INFO', '心率信号恢复 - 关闭警报');
+    }
+
+    // ============ 动画循环 ============
+    function animate(time) {
+      animationId = requestAnimationFrame(animate);
+      
+      const t = time * 0.001;
+      
+      // ECG 数据更新：仅当已连接且有心率值时生成波形，否则为直线(0)
+      let ecgValue = 0;
+      if (connected && currentBPM !== null && currentBPM > 0) {
+        ecgPhase += 0.016 * (currentBPM / 60);
+        ecgValue = generateECGValue(ecgPhase, currentBPM);
+      }
+      ecgData.push(ecgValue);
+      if (ecgData.length > ecgMaxPoints) {
+        ecgData.shift();
+      }
+      
+      // 心跳检测
+      if (ecgValue > 0.6 && t - lastBeatTime > 0.5) {
+        lastBeatTime = t;
+        pulseIntensity = 1;
+        
+        playHeartbeat();
+        
+        heartRateEl.classList.remove('alarm');
+        heartRateEl.classList.add('pulse');
+        setTimeout(() => heartRateEl.classList.remove('pulse'), 150);
+      }
+      
+      // 脉冲衰减
+      pulseIntensity *= 0.95;
+      
+      // 警报检测（连接状态但5秒无数据）
+      if (connected && t - lastDataTime > 5) {
+        startAlarm();
+      } else {
+        stopAlarm();
+      }
+      
+      // 更新 Three.js
+      if (stars && stars.material.uniforms) {
+        stars.material.uniforms.uTime.value = t;
+        stars.material.uniforms.uPulse.value = Math.max(0, Math.min(1, pulseIntensity));
+      }
+      
+      if (particles && particles.material.uniforms) {
+        particles.material.uniforms.uTime.value = t;
+        particles.material.uniforms.uPulse.value = Math.max(0, Math.min(1, pulseIntensity));
+      }
+      
+      if (stars) {
+        stars.rotation.y = t * 0.02;
+        stars.rotation.x = t * 0.01;
+      }
+      
+      if (particles) {
+        particles.rotation.y = -t * 0.03;
+      }
+      
+      drawECG();
+      
+      renderer.render(scene, camera);
+    }
+
+    // ============ BLE 连接 ============
+    // 核心修复：使用API要求的正确格式
+    // 方案A：标准名称（来自蓝牙官网）- 这是您最初正确的写法
+    // 方案B：完整的128位UUID - 最通用、最规范的写法，兼容性最好
+    // 这里我们采用方案B，避免任何可能的别名解析问题
+    const HEART_RATE_SERVICE = '0000180d-0000-1000-8000-00805f9b34fb';
+    const HEART_RATE_CHARACTERISTIC = '00002a37-0000-1000-8000-00805f9b34fb';
+
+    connectBtn.addEventListener('click', async () => {
+      // 用户手势：初始化音频并恢复上下文，确保声音可以播放
+      initAudio();
+      if (audioContext && audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+
+      if (connected) {
+        disconnect();
+        return;
+      }
+
+      try {
+        logDebug('SCAN', '正在扫描蓝牙设备...');
+        statusText.textContent = '扫描中...';
+        connectBtn.disabled = true;
+
+        // 使用完整的128位UUID进行过滤，这是最规范的写法
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ services: [HEART_RATE_SERVICE] }]
+        });
+
+        logDebug('FOUND', `发现设备: ${device.name || '未知设备'}`);
+        
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+
+        statusText.textContent = '连接中...';
+        logDebug('CONN', '正在连接 GATT 服务器...');
+
+        server = await device.gatt.connect();
+        logDebug('CONN', 'GATT 连接成功');
+
+        const service = await server.getPrimaryService(HEART_RATE_SERVICE);
+        logDebug('SERV', '获取心率服务成功');
+
+        const char = await service.getCharacteristic(HEART_RATE_CHARACTERISTIC);
+        logDebug('CHAR', '获取心率特征值成功');
+
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', handleHeartRate);
+        logDebug('SUBS', '订阅心率通知成功', true);
+
+        connected = true;
+        // 重置心率值和最后数据时间，等待真实数据
+        currentBPM = null;
+        heartRateEl.textContent = '--';
+        lastDataTime = performance.now() * 0.001;
+        connectBtn.textContent = '断开连接';
+        connectBtn.classList.add('connected');
+        connectBtn.disabled = false;
+        statusText.textContent = '已连接';
+        statusDot.classList.add('connected');
+
+      } catch (err) {
+        console.error('连接失败：', err);
+        // 根据不同的错误类型给出更友好的提示
+        if (err.message.includes('No Services matching')) {
+          logDebug('FAIL', '设备不支持标准心率服务 (0000180d-...)。请确认连接的是心率监测器。', true);
+          statusText.textContent = '设备不支持';
+        } else if (err.message.includes('User cancelled')) {
+          logDebug('INFO', '用户取消了设备选择');
+          statusText.textContent = '已取消';
+        } else if (err.message.includes('Invalid Service name')) {
+          logDebug('FAIL', '服务UUID格式错误，请检查代码。', true);
+          statusText.textContent = 'UUID错误';
+        } else {
+          logDebug('FAIL', `错误: ${err.message}`, true);
+          statusText.textContent = '连接失败';
+        }
+        connectBtn.textContent = '连接设备';
+        connectBtn.classList.remove('connected');
+        connectBtn.disabled = false;
+        connected = false;
+        statusDot.classList.remove('connected');
+      }
+    });
+
+    function handleHeartRate(event) {
+      const value = event.target.value;
+      const t = performance.now() * 0.001;
+      lastDataTime = t;
+      
+      // 解析完整数据包
+      const flags = value.getUint8(0);
+      const bpm8 = value.getUint8(1);
+      
+      // 构建数据包字符串
+      let dataStr = `Flags: 0x${flags.toString(16).padStart(2, '0')}`;
+      dataStr += ` | BPM: ${bpm8}`;
+      
+      // 显示更多字节（如果有）
+      if (value.byteLength > 2) {
+        let extra = ' | Raw: ';
+        for (let i = 0; i < value.byteLength; i++) {
+          extra += value.getUint8(i).toString(16).padStart(2, '0') + ' ';
+        }
+        dataStr += extra;
+      }
+      
+      logDebug('DATA', dataStr, true);
+      
+      if (bpm8 > 0 && bpm8 < 300) {
+        currentBPM = bpm8;
+        heartRateEl.textContent = bpm8;
+      }
+      
+      // 收到数据时关闭警报
+      stopAlarm();
+    }
+
+    function onDisconnected() {
+      logDebug('DISC', '设备已断开连接', true);
+      statusText.textContent = '已断开';
+      heartRateEl.textContent = '--';
+      connectBtn.textContent = '连接设备';
+      connectBtn.classList.remove('connected');
+      connected = false;
+      currentBPM = null;
+      statusDot.classList.remove('connected');
+      stopAlarm();
+      // 断开后心电图立即恢复为直线
+      clearECGToZero();
+    }
+
+    function disconnect() {
+      if (server) server.disconnect();
+      onDisconnected();
+    }
+
+    // ============ 初始化 ============
+    function init() {
+      initECG();
+      initThree();
+      animate(0);
+      
+      // 声音开关交互：用户打开开关时初始化音频
+      soundToggle.addEventListener('change', () => {
+        if (soundToggle.checked) {
+          initAudio();
+          if (audioContext && audioContext.state === 'suspended') {
+            audioContext.resume();
+          }
+        }
+      });
+      
+      logDebug('INIT', '心宿系统初始化完成');
+      logDebug('WAIT', '等待蓝牙设备连接...');
+    }
+
+    init();
+  </script>
+</body>
+</html>
